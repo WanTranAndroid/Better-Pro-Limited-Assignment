@@ -23,6 +23,23 @@ A resilient, Clean Architecture-based Flutter application demonstrating advanced
     *   **Type Safety**: Extensive use of `freezed` for immutable data classes and unions.
     *   **Rich Domain Model**: Domain-driven design with Value Objects (e.g., `Amount`, `Currency`).
 
+## 💡 Design Decisions & Reliability
+
+### 1. Preventing Duplicate Debits (Double Spending)
+To ensure idempotency and prevent charging the user twice for the same action:
+*   **Client-Generated ID**: Every transaction generates a unique UUID (Idempotency Key) on the client side before any network request is made.
+*   **Write-Ahead Logging (WAL)**: The transaction is persisted locally in Hive with a `created` status *before* calling the API.
+*   **State Tracking**: The local status transitions to `broadcasting` immediately before the network call. If the app crashes or network fails, we know exactly which transaction was in flight.
+*   **Server Idempotency**: The backend (mocked) uses the client-generated ID to identify requests. Retrying a request with the same ID returns the existing transaction result instead of creating a new one.
+
+### 2. Self-Recovery from Unknown States
+When a transaction state becomes ambiguous (e.g., network timeout `504` or app crash during request):
+*   **Unknown State Handling**: If a timeout occurs, the local transaction status is updated to `unknown` (instead of `failed`). This distinguishes between a definite failure and a potential success that wasn't acknowledged.
+*   **Recovery Mechanism**: 
+    *   On app startup (or manual refresh), the `RecoverPendingTransactionsUseCase` is triggered.
+    *   It queries the local database for any transactions in `broadcasting` or `unknown` states.
+    *   It polls the server's status endpoint (`GET /status?id=...`) to synchronize the final state (Success/Failed) back to the local database.
+
 ## 🏗 Architecture Overview
 
 ```mermaid
